@@ -47,14 +47,77 @@ async function ensureDirectories() {
   }
 }
 
+// Tạo file thứ tự
+async function ensureOrderFile() {
+  const orderFilePath = path.join(CONTENT_DIR, '.file-order.json');
+  try {
+    await fs.access(orderFilePath);
+  } catch (error) {
+    // Nếu file không tồn tại, tạo một file mới với thứ tự mặc định
+    try {
+      const files = await fs.readdir(CONTENT_DIR);
+      const markdownFiles = files.filter(file => file.endsWith('.md')).map(file => file.replace('.md', ''));
+      
+      const orderData = {
+        files: markdownFiles.map((name, index) => ({ name, order: index }))
+      };
+      
+      await fs.writeFile(orderFilePath, JSON.stringify(orderData, null, 2));
+    } catch (createError) {
+      console.error('Lỗi khi tạo file thứ tự:', createError);
+    }
+  }
+}
+
 // API routes
 // Lấy danh sách tất cả các file
 app.get('/api/files', async (req, res) => {
   try {
+    // Đọc file thứ tự
+    const orderFilePath = path.join(CONTENT_DIR, '.file-order.json');
+    let fileOrder = [];
+    
+    try {
+      const orderContent = await fs.readFile(orderFilePath, 'utf-8');
+      const orderData = JSON.parse(orderContent);
+      fileOrder = orderData.files || [];
+    } catch {
+      // Nếu không đọc được file thứ tự, tiếp tục
+    }
+    
     const files = await fs.readdir(CONTENT_DIR);
-    const markdownFiles = files
+    let markdownFiles = files
       .filter(file => file.endsWith('.md'))
       .map(file => file.replace('.md', ''));
+    
+    // Sắp xếp theo thứ tự đã lưu
+    if (fileOrder.length > 0) {
+      // Tạo map từ tên file đến thứ tự
+      const orderMap = new Map();
+      fileOrder.forEach(item => {
+        orderMap.set(item.name, item.order);
+      });
+      
+      // Sắp xếp markdownFiles dựa trên orderMap
+      markdownFiles.sort((a, b) => {
+        const orderA = orderMap.has(a) ? orderMap.get(a) : Infinity;
+        const orderB = orderMap.has(b) ? orderMap.get(b) : Infinity;
+        return orderA - orderB;
+      });
+      
+      // Cập nhật file thứ tự nếu có file mới
+      const newFiles = markdownFiles.filter(file => !orderMap.has(file));
+      if (newFiles.length > 0) {
+        const maxOrder = Math.max(...fileOrder.map(item => item.order), -1);
+        const updatedOrder = [
+          ...fileOrder,
+          ...newFiles.map((name, idx) => ({ name, order: maxOrder + idx + 1 }))
+        ];
+        
+        await fs.writeFile(orderFilePath, JSON.stringify({ files: updatedOrder }, null, 2));
+      }
+    }
+    
     res.json(markdownFiles);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -402,6 +465,25 @@ app.get('/api/backup', async (req, res) => {
   }
 });
 
+// Cập nhật thứ tự file
+app.post('/api/files/reorder', async (req, res) => {
+  try {
+    const { files } = req.body;
+    
+    if (!Array.isArray(files)) {
+      return res.status(400).json({ error: 'Định dạng không hợp lệ' });
+    }
+    
+    // Cập nhật file thứ tự
+    const orderFilePath = path.join(CONTENT_DIR, '.file-order.json');
+    await fs.writeFile(orderFilePath, JSON.stringify({ files }, null, 2));
+    
+    res.json({ message: 'Thứ tự file đã được cập nhật' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Phục vụ ứng dụng Vue từ thư mục client/dist trong production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'client/dist')));
@@ -413,6 +495,7 @@ if (process.env.NODE_ENV === 'production') {
 // Khởi động server
 async function startServer() {
   await ensureDirectories();
+  await ensureOrderFile();
   app.listen(PORT, () => {
     console.log(`Server đang chạy tại http://localhost:${PORT}`);
   });

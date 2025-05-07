@@ -25,25 +25,31 @@
         <div class="action-panel">
           <div class="panel-title">Điều chỉnh vị trí và tên trang</div>
           
-          <div class="search-filter">
-            <input 
-              type="text" 
-              v-model="contentFilter" 
-              placeholder="Tìm kiếm trang..." 
-              class="search-input"
-            />
-            <select v-model="sortOrder" class="sort-select">
-              <option value="name-asc">Tên A-Z</option>
-              <option value="name-desc">Tên Z-A</option>
-              <option value="order">Thứ tự hiện tại</option>
-            </select>
-          </div>
-          
           <div class="file-list-container">
-            <draggable v-model="orderedFiles" group="files" @end="updateOrder" class="file-list" item-key="id" :disabled="sortOrder !== 'order'">
+            <div v-if="orderedFiles.length === 0" class="empty-file-list">
+              Không tìm thấy tệp nào. Vui lòng thêm tệp mới.
+            </div>
+            
+            <!-- Draggable component -->
+            <draggable 
+              v-model="orderedFiles" 
+              group="files" 
+              @end="updateOrder" 
+              class="file-list" 
+              item-key="id" 
+              :disabled="sortOrder !== 'order'"
+              tag="div"
+              handle=".drag-handle"
+              animation="200"
+              ghost-class="ghost-item"
+              chosen-class="chosen-item"
+              drag-class="dragging-item"
+            >
               <template #item="{element: file, index}">
-                <div class="file-item-draggable" :class="{ 'highlight': isFileHighlighted(file) }">
-                  <div class="drag-handle" v-if="sortOrder === 'order'">⋮⋮</div>
+                <div class="file-item-draggable">
+                  <div class="drag-handle" v-if="sortOrder === 'order'">
+                    <span class="drag-icon">⠿</span>
+                  </div>
                   <span class="file-number">{{ index + 1 }}.</span>
                   <input 
                     type="text" 
@@ -59,12 +65,34 @@
                 </div>
               </template>
             </draggable>
-          </div>
-          
-          <div class="file-actions-panel">
-            <button class="action-button create-button" @click="createNewFile">
-              <span class="icon">📄</span> Tạo trang mới
-            </button>
+
+            <!-- Nút điều khiển thứ tự -->
+            <div class="direct-order-controls" v-if="orderedFiles.length > 1">
+              <p>Di chuyển vị trí các trang:</p>
+              <div class="order-buttons-container">
+                <div v-for="(file, index) in orderedFiles" :key="file.id" class="order-item">
+                  <div class="order-item-name">{{ index + 1 }}. {{ file.displayName }}</div>
+                  <div class="order-buttons">
+                    <button 
+                      @click="moveItem(index, index - 1)" 
+                      :disabled="index === 0"
+                      class="order-button up-button"
+                      title="Di chuyển lên"
+                    >
+                      ⬆️
+                    </button>
+                    <button 
+                      @click="moveItem(index, index + 1)" 
+                      :disabled="index === orderedFiles.length - 1"
+                      class="order-button down-button"
+                      title="Di chuyển xuống"
+                    >
+                      ⬇️
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -213,7 +241,6 @@ export default {
       },
       showImportForm: false,
       isDarkMode: localStorage.getItem('darkMode') === 'true',
-      contentFilter: '',
       sortOrder: 'order',
       showDeleteConfirm: false,
       fileToDelete: null,
@@ -229,26 +256,31 @@ export default {
     files: {
       immediate: true,
       handler(newFiles) {
-        this.orderedFiles = newFiles.map((file, index) => ({
-          id: file,
-          displayName: this.formatFileName(file),
-          originalName: file,
-          order: index
-        }));
+        console.log('ContentManager watch - Files thay đổi:', newFiles);
+        if (Array.isArray(newFiles) && newFiles.length > 0) {
+          this.orderedFiles = newFiles.map((file, index) => ({
+            id: file,
+            displayName: this.formatFileName(file),
+            originalName: file,
+            order: index
+          }));
+          console.log('ContentManager watch - orderedFiles đã cập nhật:', this.orderedFiles);
+        } else {
+          console.log('ContentManager watch - Files trống hoặc không phải mảng:', newFiles);
+          this.orderedFiles = [];
+        }
       }
     },
     isDarkMode(newVal) {
       localStorage.setItem('darkMode', newVal);
+    },
+    show(newVal) {
+      if (newVal === true) {
+        this.updateOrderedFiles();
+      }
     }
   },
   computed: {
-    filteredFiles() {
-      if (!this.contentFilter) return this.orderedFiles;
-      
-      return this.orderedFiles.filter(file => 
-        file.displayName.toLowerCase().includes(this.contentFilter.toLowerCase())
-      );
-    }
   },
   methods: {
     formatFileName(fileName) {
@@ -261,8 +293,41 @@ export default {
       this.isDarkMode = !this.isDarkMode;
     },
     updateOrder() {
-      // Cập nhật thứ tự files sau khi kéo thả
-      this.$emit('reorder-files', this.orderedFiles.map(file => file.id));
+      console.log('Cập nhật thứ tự file:', this.orderedFiles);
+      
+      // Cập nhật thứ tự mới của các file
+      const newOrder = this.orderedFiles.map((file, index) => ({
+        name: file.originalName,
+        order: index
+      }));
+      
+      console.log('Thứ tự mới:', newOrder);
+      
+      // Gọi API để cập nhật thứ tự trên server
+      this.saveFileOrder(newOrder);
+    },
+    async saveFileOrder(newOrder) {
+      try {
+        console.log('Đang gửi yêu cầu cập nhật thứ tự:', newOrder);
+        await axios.post('/api/files/reorder', { files: newOrder });
+        console.log('Cập nhật thứ tự thành công');
+        
+        // Gửi sự kiện thông báo thứ tự đã thay đổi
+        this.$emit('files-reordered', newOrder.map(file => file.name));
+        this.showNotification('Đã cập nhật thứ tự các trang');
+        
+        // Tải lại danh sách file sau khi cập nhật thành công
+        setTimeout(() => {
+          this.updateOrderedFiles();
+        }, 500);
+      } catch (error) {
+        console.error('Lỗi khi cập nhật thứ tự file:', error);
+        this.showNotification('Không thể cập nhật thứ tự trang: ' + error.message);
+      }
+    },
+    showNotification(message) {
+      // Hiển thị thông báo trong ContentManager
+      alert(message);
     },
     updateFileName(file) {
       // Cập nhật tên hiển thị của file
@@ -279,10 +344,6 @@ export default {
         file.originalName = newName;
       }
     },
-    isFileHighlighted(file) {
-      return this.contentFilter && 
-             file.displayName.toLowerCase().includes(this.contentFilter.toLowerCase());
-    },
     editFile(fileId) {
       // Mở file để chỉnh sửa
       this.$emit('edit-file', fileId);
@@ -298,10 +359,6 @@ export default {
         this.showDeleteConfirm = false;
         this.fileToDelete = null;
       }
-    },
-    createNewFile() {
-      this.$emit('create-file');
-      this.$emit('close');
     },
     previewFile(fileId) {
       // Thực hiện API call để lấy nội dung file và render
@@ -432,7 +489,65 @@ export default {
     saveChanges() {
       this.$emit('save-config', this.siteConfig);
       this.$emit('close');
+    },
+    async updateOrderedFiles() {
+      console.log('ContentManager - Đang tải lại danh sách file');
+      try {
+        // Gọi trực tiếp API để lấy danh sách file
+        const response = await axios.get('/api/files');
+        const files = response.data;
+        console.log('ContentManager - Dữ liệu API trả về:', files);
+        
+        // Kiểm tra và hiển thị thông báo lỗi nếu API không trả về mảng
+        if (!Array.isArray(files)) {
+          console.error('ContentManager - API không trả về mảng:', files);
+          this.showNotification('Lỗi: Dữ liệu từ API không đúng định dạng');
+          return;
+        }
+        
+        // Cập nhật orderedFiles từ dữ liệu API và emit event
+        if (files.length > 0) {
+          this.orderedFiles = files.map((file, index) => ({
+            id: file,
+            displayName: this.formatFileName(file),
+            originalName: file,
+            order: index
+          }));
+          console.log('ContentManager - orderedFiles sau khi refresh:', this.orderedFiles);
+          this.$emit('files-updated', files);
+        } else {
+          console.log('ContentManager - Không có file từ API');
+          this.orderedFiles = [];
+        }
+      } catch (error) {
+        console.error('Lỗi khi tải lại danh sách file:', error);
+        this.showNotification('Không thể tải danh sách file: ' + (error.message || 'Lỗi không xác định'));
+      }
+    },
+    moveItem(fromIndex, toIndex) {
+      // Di chuyển item từ vị trí fromIndex đến toIndex
+      const item = this.orderedFiles.splice(fromIndex, 1)[0];
+      this.orderedFiles.splice(toIndex, 0, item);
+      
+      // Cập nhật thứ tự của các file
+      const newOrder = this.orderedFiles.map((file, index) => ({
+        name: file.originalName,
+        order: index
+      }));
+      
+      // Gọi API để cập nhật thứ tự trên server
+      this.saveFileOrder(newOrder);
     }
+  },
+  mounted() {
+    // Debug: Log dữ liệu files khi component mount
+    console.log('ContentManager mounted - Files nhận được:', this.files);
+    
+    // Tự động tải danh sách file khi component được mount
+    // Đặt timeout để đảm bảo mọi thứ đã được khởi tạo đầy đủ
+    setTimeout(() => {
+      this.updateOrderedFiles();
+    }, 300);
   }
 };
 </script>
@@ -574,44 +689,6 @@ export default {
   color: #f0f0f0;
 }
 
-.search-filter {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.search-input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  transition: border-color 0.3s;
-}
-
-.modal-content.dark-mode .search-input {
-  background-color: #444;
-  border-color: #555;
-  color: #f0f0f0;
-}
-
-.search-input:focus {
-  border-color: #3498db;
-  outline: none;
-}
-
-.sort-select {
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.modal-content.dark-mode .sort-select {
-  background-color: #444;
-  border-color: #555;
-  color: #f0f0f0;
-}
-
 .file-list-container {
   max-height: 300px;
   overflow-y: auto;
@@ -652,22 +729,32 @@ export default {
   background-color: #555;
 }
 
-.file-item-draggable.highlight {
-  background-color: rgba(52, 152, 219, 0.1);
-}
-
-.modal-content.dark-mode .file-item-draggable.highlight {
-  background-color: rgba(52, 152, 219, 0.2);
-}
-
 .drag-handle {
-  cursor: move;
+  cursor: grab;
   margin-right: 10px;
-  color: #999;
+  padding: 8px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drag-icon {
+  font-size: 1.2rem;
+  display: inline-block;
 }
 
 .modal-content.dark-mode .drag-handle {
-  color: #bbb;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.drag-handle:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.modal-content.dark-mode .drag-handle:hover {
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 .file-number {
@@ -1063,10 +1150,6 @@ export default {
     font-size: 0.9rem;
   }
   
-  .search-filter {
-    flex-direction: column;
-  }
-  
   .import-options {
     flex-direction: column;
   }
@@ -1074,5 +1157,130 @@ export default {
   .action-button {
     width: 100%;
   }
+}
+
+.empty-file-list {
+  padding: 20px;
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}
+
+.modal-content.dark-mode .empty-file-list {
+  color: #bbb;
+}
+
+.toggle-view-mode {
+  margin-top: 15px;
+  display: flex;
+  justify-content: center;
+}
+
+.toggle-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+  background-color: #3498db;
+  color: white;
+}
+
+.toggle-btn:hover {
+  background-color: #2980b9;
+  transform: translateY(-2px);
+}
+
+.ghost-item {
+  opacity: 0.5;
+  background: #c8ebfb !important;
+  border: 1px dashed #3498db !important;
+}
+
+.modal-content.dark-mode .ghost-item {
+  background: #2c3e50 !important;
+  border: 1px dashed #3498db !important;
+}
+
+.chosen-item {
+  background-color: #f0f7fa;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.modal-content.dark-mode .chosen-item {
+  background-color: #2c3e50;
+}
+
+.dragging-item {
+  cursor: grabbing;
+}
+
+/* Styles cho nút sắp xếp trực tiếp */
+.direct-order-controls {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #f7f7f7;
+  border-radius: 5px;
+  border: 1px solid #eee;
+}
+
+.modal-content.dark-mode .direct-order-controls {
+  background-color: #333;
+  border-color: #444;
+}
+
+.order-buttons-container {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.order-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background-color: white;
+  border-radius: 4px;
+  border: 1px solid #eee;
+}
+
+.modal-content.dark-mode .order-item {
+  background-color: #444;
+  border-color: #555;
+}
+
+.order-item-name {
+  flex: 1;
+}
+
+.order-buttons {
+  display: flex;
+  gap: 5px;
+}
+
+.order-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 3px 5px;
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+
+.order-button:hover:not(:disabled) {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.order-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.modal-content.dark-mode .order-button:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 </style> 

@@ -15,7 +15,7 @@
         <span class="button-text">Tạo mới</span>
       </button>
       <button @click="$emit('manage-content')" class="action-button manage-button">
-        <span class="button-icon">⚙️</span>
+        <span class="button-icon">⋮⋮</span>
         <span class="button-text">Quản lý</span>
       </button>
     </div>
@@ -118,6 +118,7 @@ export default {
       default: () => []
     }
   },
+  emits: ['select-file', 'create-file', 'delete-file', 'scroll-to-heading', 'manage-content', 'search'],
   data() {
     return {
       searchQuery: '',
@@ -136,8 +137,8 @@ export default {
       return this.files;
     },
     filteredHeadings() {
-      // Chỉ hiển thị heading cấp 2 (##) trở lên
-      return this.headings.filter(heading => heading.level = 2);
+      // Chỉ hiển thị heading cấp 2 (##)
+      return this.headings.filter(heading => heading.level <= 2 && heading.level >= 2);
     }
   },
   watch: {

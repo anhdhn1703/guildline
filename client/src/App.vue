@@ -8,6 +8,7 @@
       @create-file="showCreateFileModal = true"
       @delete-file="confirmDeleteFile"
       @scroll-to-heading="scrollToHeading"
+      @manage-content="showContentManager = true"
     />
 
     <main class="content-area">
@@ -38,6 +39,15 @@
       @close="showDeleteModal = false"
       @confirm="deleteFile"
     />
+    
+    <ContentManager
+      :show="showContentManager"
+      :files="files"
+      @close="showContentManager = false"
+      @files-reordered="handleFilesReordered"
+      @refresh-files="fetchFiles"
+      @files-updated="handleFilesUpdated"
+    />
   </div>
 </template>
 
@@ -47,6 +57,7 @@ import Sidebar from './components/Sidebar.vue';
 import MarkdownEditor from './components/MarkdownEditor.vue';
 import CreateFileModal from './components/CreateFileModal.vue';
 import DeleteConfirmModal from './components/DeleteConfirmModal.vue';
+import ContentManager from './components/ContentManager.vue';
 import axios from 'axios';
 
 // Tạo renderer tùy chỉnh cho App.vue để đảm bảo thống nhất với MarkdownEditor
@@ -70,7 +81,8 @@ export default {
     Sidebar,
     MarkdownEditor,
     CreateFileModal,
-    DeleteConfirmModal
+    DeleteConfirmModal,
+    ContentManager
   },
   data() {
     return {
@@ -81,6 +93,7 @@ export default {
       headings: [],
       showCreateFileModal: false,
       showDeleteModal: false,
+      showContentManager: false,
       fileToDelete: ''
     };
   },
@@ -90,8 +103,10 @@ export default {
   methods: {
     async fetchFiles() {
       try {
+        console.log('App.vue - Đang gọi API lấy danh sách file');
         const response = await axios.get('/api/files');
         this.files = response.data;
+        console.log('App.vue - Danh sách file đã nhận:', this.files);
       } catch (error) {
         console.error('Lỗi khi tải danh sách file:', error);
       }
@@ -99,11 +114,18 @@ export default {
     
     async loadFile(fileName) {
       try {
+        console.log('App.vue - Đang tải file:', fileName);
         const response = await axios.get(`/api/files/${fileName}`);
         this.currentFile = fileName;
         this.markdownContent = response.data.content;
         this.markdownHtml = marked(response.data.content);
-        this.extractHeadings();
+        console.log('App.vue - Nội dung file đã tải:', this.markdownContent);
+        
+        // Đảm bảo extract headings sau khi cập nhật nội dung
+        this.$nextTick(() => {
+          this.extractHeadings();
+          console.log('App.vue - Sau khi tải file, headings:', this.headings);
+        });
       } catch (error) {
         console.error('Lỗi khi tải file:', error);
       }
@@ -113,21 +135,53 @@ export default {
       const headings = [];
       const lines = this.markdownContent.split('\n');
       
-      for (let line of lines) {
-        const match = line.match(/^(#+)\s+(.+)$/);
-        if (match) {
-          const level = match[1].length;
-          const text = match[2].trim();
-          const escapedText = text.toLowerCase().replace(/[^\w]+/g, '-');
-          const id = `heading-${escapedText}`;
-          headings.push({ level, text, id });
+      console.log('App.vue - Đang trích xuất headings từ nội dung, tổng số dòng:', lines.length);
+      console.log('App.vue - Nội dung markdown:', this.markdownContent);
+      
+      // Debug: In ra dòng đầu tiên để kiểm tra
+      if (lines.length > 0) {
+        console.log('App.vue - Dòng đầu tiên:', JSON.stringify(lines[0]));
+      }
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim(); // Cắt bỏ khoảng trắng thừa
+        
+        // In ra dòng hiện tại để debug
+        console.log(`App.vue - Dòng ${i+1}:`, JSON.stringify(line));
+        
+        // Kiểm tra heading với regex
+        if (line.startsWith('#')) {
+          console.log(`App.vue - Dòng ${i+1} có thể là heading:`, line);
+          
+          // Tìm tất cả các dòng bắt đầu bằng # và theo sau là khoảng trắng
+          const match = line.match(/^(#+)\s+(.+)$/);
+          if (match) {
+            const level = match[1].length;
+            const text = match[2].trim();
+            const escapedText = text.toLowerCase().replace(/[^\w]+/g, '-');
+            const id = `heading-${escapedText}`;
+            console.log(`App.vue - Tìm thấy heading tại dòng ${i+1}: level=${level}, text="${text}", id="${id}"`);
+            headings.push({ level, text, id });
+          } else {
+            console.log(`App.vue - Dòng ${i+1} bắt đầu bằng # nhưng không match pattern heading:`, line);
+          }
         }
       }
       
+      console.log('App.vue - Tổng số headings đã trích xuất:', headings.length);
+      if (headings.length > 0) {
+        console.log('App.vue - Danh sách headings:', headings);
+      } else {
+        console.log('App.vue - Không tìm thấy heading nào trong nội dung');
+      }
+      
+      // Gán headings vào state và log để debug
+      console.log('App.vue - Gán headings vào state:', headings);
       this.headings = headings;
     },
     
     updateHeadings(headings) {
+      console.log('Nhận headings từ MarkdownEditor:', headings);
       this.headings = headings;
     },
     
@@ -237,6 +291,19 @@ export default {
         await this.fetchFiles();
       } catch (error) {
         console.error('Lỗi khi xóa file:', error);
+      }
+    },
+    
+    handleFilesReordered(newFiles) {
+      console.log('App - Thứ tự file đã thay đổi:', newFiles);
+      // Cập nhật mảng files với thứ tự mới
+      this.fetchFiles();
+    },
+    
+    handleFilesUpdated(files) {
+      console.log('App - Danh sách file được cập nhật từ ContentManager:', files);
+      if (Array.isArray(files)) {
+        this.files = files;
       }
     }
   }

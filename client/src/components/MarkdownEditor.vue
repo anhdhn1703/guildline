@@ -190,6 +190,7 @@ export default {
       return this.html;
     },
     markdownPreview() {
+      // Trả về kết quả đã được parse từ Markdown sang HTML
       return marked(this.localContent || '');
     }
   },
@@ -198,6 +199,12 @@ export default {
       this.localContent = newContent;
       if (!this.wysiwyg.contentUpdated) {
         this.wysiwyg.content = this.markdownToHtml(newContent);
+      }
+    },
+    localContent: {
+      handler() {
+        // Xử lý headings khi nội dung thay đổi
+        this.processHeadings();
       }
     },
     isDarkMode(newVal) {
@@ -224,6 +231,10 @@ export default {
   mounted() {
     document.addEventListener('darkModeChanged', this.handleDarkModeChange);
     this.wysiwyg.content = this.markdownToHtml(this.localContent);
+    
+    this.$nextTick(() => {
+      this.processHeadings();
+    });
   },
   beforeUnmount() {
     document.removeEventListener('darkModeChanged', this.handleDarkModeChange);
@@ -263,14 +274,27 @@ export default {
       const headings = [];
       const lines = this.localContent.split('\n');
       
-      for (let line of lines) {
+      console.log('MarkdownEditor - Đang xử lý headings, tổng số dòng:', lines.length);
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Kiểm tra cả dấu # và khoảng trắng sau nó để đảm bảo đó là heading hợp lệ
         const match = line.match(/^(#+)\s+(.+)$/);
         if (match) {
           const level = match[1].length;
           const text = match[2].trim();
-          const id = text.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+          const escapedText = text.toLowerCase().replace(/[^\w]+/g, '-');
+          const id = `heading-${escapedText}`;
+          console.log(`MarkdownEditor - Tìm thấy heading tại dòng ${i+1}: level=${level}, text="${text}", id="${id}"`);
           headings.push({ level, text, id });
         }
+      }
+      
+      console.log('MarkdownEditor - Tổng số headings được xử lý:', headings.length);
+      if (headings.length > 0) {
+        console.log('MarkdownEditor - Danh sách headings:', headings);
+      } else {
+        console.log('MarkdownEditor - Không tìm thấy heading nào trong nội dung');
       }
       
       this.$emit('update-headings', headings);
